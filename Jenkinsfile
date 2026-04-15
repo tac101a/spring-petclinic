@@ -6,7 +6,7 @@ pipeline {
         // Repo cá nhân để có quyền Push Tag
         GITHUB_REPO = 'https://github.com/tac101a/spring-petclinic.git' 
         SONAR_SERVER_NAME = 'sonar-server' 
-        NEXUS_URL = 'http://nexus.abc/repository/maven-releases'
+        NEXUS_URL = 'http' + '://nexus.abc/repository/maven-releases'
         GIT_CREDENTIALS_ID = 'github-token-credentials'
     }
 

@@ -149,7 +149,7 @@ pipeline {
                     if (env.BRANCH_NAME ==~ /uat\/.*/) {
                         generatedTagName = "${date}-uat-${gitHash}"
                     } else if (env.BRANCH_NAME == 'main') {
-                        generatedTagName = "${date}-release"
+                        generatedTagName = "${date}-b${env.BUILD_NUMBER}-release"
                     }
 
                     echo "Kích hoạt Auto Tagging: ${generatedTagName}"

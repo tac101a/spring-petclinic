@@ -44,8 +44,7 @@ pipeline {
                     '''
                 } // Đóng withCredentials
             } // Đóng steps
-        } // ĐÓNG STAGE 4 (ĐÂY CHÍNH LÀ DẤU NGOẶC BẠN BỊ THIẾU)
-
+        }
         stage('Giai đoạn 5: Deploy App & Health Check') {
             when { anyOf { branch 'uat/*'; branch 'main' } }
             steps {
@@ -56,32 +55,55 @@ pipeline {
                     '''
                 }
 
-                echo "2. Don dep tien trinh cu (Graceful Shutdown)..."
+                echo "2. Don dep tàn dư của nhánh hiện tại..."
                 sh '''
-                    PID=$(pgrep -f "app.jar") || true
+                    # Xử lý dấu gạch chéo trong tên nhánh (vd: uat/feature -> uat-feature)
+                    SAFE_BRANCH_NAME=${BRANCH_NAME//\\//-}
+                    APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
+                    
+                    # Chỉ tìm và tiêu diệt tiến trình thuộc về đúng nhánh này
+                    PID=$(pgrep -f "$APP_FILE") || true
                     if [ ! -z "$PID" ]; then
-                        echo "Dang tat tien trinh cu: $PID"
+                        echo "Dang tat tien trinh cu cua nhanh $BRANCH_NAME (PID: $PID)"
                         kill -9 $PID
                         sleep 3
                     fi
+                    
+                    # Đổi tên file để cách ly hoàn toàn
+                    mv app.jar $APP_FILE
                 '''
 
-                echo "3. Khoi dong ung dung moi (Bat tu truoc ProcessTreeKiller)..."
+                echo "3. Khoi dong ung dung (Phan luong Port & Ep xung RAM)..."
                 sh '''
-                    # ĐÃ FIX: Bổ sung BUILD_ID=dontKillMe
-                    BUILD_ID=dontKillMe JENKINS_NODE_COOKIE=dontKillMe nohup java -jar app.jar > app.log 2>&1 &
+                    SAFE_BRANCH_NAME=${BRANCH_NAME//\\//-}
+                    APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
+                    
+                    if [[ "$BRANCH_NAME" == uat/* ]]; then
+                        SERVER_PORT=8081
+                    else
+                        SERVER_PORT=8080
+                    fi
+                    
+                    echo "Khoi dong nhanh $BRANCH_NAME tren cong $SERVER_PORT..."
+                    # Dùng -Xmx256m để giới hạn RAM, bảo vệ VM2 khỏi lỗi OOM
+                    BUILD_ID=dontKillMe JENKINS_NODE_COOKIE=dontKillMe nohup java -Xmx256m -jar $APP_FILE --server.port=$SERVER_PORT > app.log 2>&1 &
                 '''
 
                 echo "4. Kiem tra suc khoe thong minh (Dynamic Polling)..."
                 sh '''
-                    # ĐÃ FIX: Sử dụng vòng lặp thay vì sleep 40 cứng nhắc
+                    if [[ "$BRANCH_NAME" == uat/* ]]; then
+                        SERVER_PORT=8081
+                    else
+                        SERVER_PORT=8080
+                    fi
+                    
                     MAX_RETRIES=12
                     RETRY_INTERVAL=5
                     
-                    echo "Bat dau theo doi trang thai khoi dong..."
+                    echo "Bat dau theo doi cong $SERVER_PORT..."
                     
                     for i in $(seq 1 $MAX_RETRIES); do
-                        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
+                        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$SERVER_PORT/)
                         
                         if [ "$HTTP_STATUS" -eq 200 ]; then
                             echo "Thanh cong! Ung dung len song o giay thu $((i * RETRY_INTERVAL))."
@@ -99,7 +121,6 @@ pipeline {
             }
         }
 
-        // NHÓM 3: TỰ ĐỘNG ĐÁNH TAG (CHỈ CHO UAT VÀ MAIN)
         stage('Giai đoạn 6: Auto-Tagging') {
             when { 
                 beforeAgent true
@@ -117,14 +138,15 @@ pipeline {
                         tagName = "${date}-release"
                     }
 
-                    echo "Kích hoạt Tagging: ${tagName}"
+                    echo "Kích hoạt Auto Tagging: ${tagName}"
                     
                     withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", passwordVariable: 'GIT_PASS', usernameVariable: 'GIT_USER')]) {
                         sh """
                             git config user.email "jenkins@fpt.com"
                             git config user.name "Jenkins CI"
                             git tag -a ${tagName} -m "Auto deploy from Jenkins"
-                            git push https://${GIT_USER}:${GIT_PASS}@github.com/tac101a/spring-petclinic.git ${tagName}
+                            # ĐÃ FIX: Bảo vệ nội suy biến bằng dấu backslash (\\)
+                            git push https://\\$GIT_USER:\\$GIT_PASS@github.com/tac101a/spring-petclinic.git ${tagName}
                         """
                     }
                 }

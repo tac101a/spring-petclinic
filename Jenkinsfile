@@ -37,13 +37,22 @@ pipeline {
             when { anyOf { branch 'uat/*'; branch 'main' } }
             steps {
                 sh './mvnw package -DskipTests'
+                
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
                     sh '''
+                        # Xử lý tên nhánh để xóa dấu gạch chéo (vd: uat/v1 -> uat-v1)
+                        SAFE_BRANCH_NAME=${BRANCH_NAME//\\//-}
                         JAR_FILE=$(ls target/*.jar | grep -v plain)
-                        curl -v -f -u ${NEXUS_USR}:${NEXUS_PSW} --upload-file ${JAR_FILE} ${NEXUS_URL}/com/fpt/petclinic/${BUILD_NUMBER}/petclinic-${BUILD_NUMBER}.jar
+                        
+                        echo "Dang đay artifact cua nhanh $BRANCH_NAME len Nexus..."
+                        
+                        # ĐÃ FIX: Thêm SAFE_BRANCH_NAME vào đường dẫn để tránh đụng hàng
+                        curl -v -f -u ${NEXUS_USR}:${NEXUS_PSW} \
+                             --upload-file ${JAR_FILE} \
+                             ${NEXUS_URL}/com/fpt/petclinic/${SAFE_BRANCH_NAME}/${BUILD_NUMBER}/petclinic-${BUILD_NUMBER}.jar
                     '''
-                } // Đóng withCredentials
-            } // Đóng steps
+                }
+            }
         }
         stage('Giai đoạn 5: Deploy App & Health Check') {
             when { anyOf { branch 'uat/*'; branch 'main' } }

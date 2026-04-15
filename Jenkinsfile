@@ -109,7 +109,8 @@ pipeline {
                     echo "Bat dau theo doi cong $SERVER_PORT..."
                     
                     for i in $(seq 1 $MAX_RETRIES); do
-                        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$SERVER_PORT/)
+                        # ĐÃ FIX: Thêm || echo "000" để vô hiệu hóa lệnh giết script của Jenkins khi curl bị từ chối kết nối
+                        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$SERVER_PORT/ || echo "000")
                         
                         if [ "$HTTP_STATUS" -eq 200 ]; then
                             echo "Thanh cong! Ung dung len song o giay thu $((i * RETRY_INTERVAL))."

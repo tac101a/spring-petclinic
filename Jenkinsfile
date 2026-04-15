@@ -105,7 +105,7 @@ pipeline {
                         tagName = "${date}-release"
                     }
 
-                    echo "Kích hoạt Egoist Tagging: ${tagName}"
+                    echo "Kích hoạt Tagging: ${tagName}"
                     
                     withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", passwordVariable: 'GIT_PASS', usernameVariable: 'GIT_USER')]) {
                         sh """

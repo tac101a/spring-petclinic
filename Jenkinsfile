@@ -171,4 +171,26 @@ pipeline {
             }
         }
     }
+    // Đặt khối post ngay sau khi đóng ngoặc của stages
+    post {
+        success {
+            script {
+                // Sử dụng SAFE_BRANCH_NAME để hiển thị cho đẹp
+                def SAFE_BRANCH_NAME = env.BRANCH_NAME.replaceAll("/", "-")
+                slackSend (
+                    color: '#36a64f', // Màu xanh
+                    message: "✅ *BUILD SUCCESS*\n*Project:* ${env.APP_NAME}\n*Branch:* ${SAFE_BRANCH_NAME}\n*Build:* #${env.BUILD_NUMBER}\n*URL:* ${env.BUILD_URL}"
+                )
+            }
+        }
+        failure {
+            script {
+                def SAFE_BRANCH_NAME = env.BRANCH_NAME.replaceAll("/", "-")
+                slackSend (
+                    color: '#eb4034', // Màu đỏ
+                    message: "❌ *BUILD FAILED*\n*Project:* ${env.APP_NAME}\n*Branch:* ${SAFE_BRANCH_NAME}\n*Build:* #${env.BUILD_NUMBER}\n*Check log tại:* ${env.BUILD_URL}console"
+                )
+            }
+        }
+    }
 }

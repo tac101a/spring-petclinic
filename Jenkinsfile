@@ -154,7 +154,7 @@ pipeline {
                                 git config user.name "Jenkins CI"
                                 git tag -a ${TAG_NAME} -m "Auto deploy from Jenkins"
                                 
-                                # Dùng dấu ngoặc đơn ''' chặn Groovy nội suy, ép Shell tự xử lý biến môi trường
+                                # Đã sửa lỗi: Không bỏ 3 dấu nháy đơn vào comment nữa để bảo toàn block
                                 git push https://${GIT_USER}:${GIT_PASS}@${GITHUB_REPO_DOMAIN} ${TAG_NAME}
                             '''
                         }

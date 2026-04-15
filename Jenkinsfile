@@ -171,14 +171,14 @@ pipeline {
             }
         }
     }
-    // Đặt khối post ngay sau khi đóng ngoặc của stages
     post {
         success {
             script {
                 def SAFE_BRANCH_NAME = env.BRANCH_NAME.replaceAll("/", "-")
                 slackSend (
+                    teamDomain: 'anhcnt-devops-lab',
                     channel: '#jenkins-alerts',
-                    tokenCredentialId: 'slack-webhook-url',
+                    tokenCredentialId: 'slack-token',
                     color: '#36a64f',
                     message: "✅ *BUILD SUCCESS*\n*Project:* ${env.APP_NAME}\n*Branch:* ${SAFE_BRANCH_NAME}\n*Build:* #${env.BUILD_NUMBER}\n*URL:* ${env.BUILD_URL}"
                 )
@@ -188,8 +188,9 @@ pipeline {
             script {
                 def SAFE_BRANCH_NAME = env.BRANCH_NAME.replaceAll("/", "-")
                 slackSend (
+                    teamDomain: 'anhcnt-devops-lab',
                     channel: '#jenkins-alerts',
-                    tokenCredentialId: 'slack-webhook-url',
+                    tokenCredentialId: 'slack-token',
                     color: '#eb4034',
                     message: "❌ *BUILD FAILED*\n*Project:* ${env.APP_NAME}\n*Branch:* ${SAFE_BRANCH_NAME}\n*Build:* #${env.BUILD_NUMBER}\n*Check log tại:* ${env.BUILD_URL}console"
                 )

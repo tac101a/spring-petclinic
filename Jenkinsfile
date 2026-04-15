@@ -12,11 +12,23 @@ pipeline {
 
     stages {
         // NHÓM 1: CHẠY CHO TẤT CẢ (develop, uat, main, PR)
-        stage('Giai đoạn 1: Compile') { steps { sh './mvnw clean compile' } }
-        stage('Giai đoạn 2: Unit Test') { steps { sh './mvnw test' } }
+        stage('Giai đoạn 1: Compile') { 
+            steps { 
+                sh './mvnw clean compile' 
+            } 
+        }
+        
+        stage('Giai đoạn 2: Unit Test') { 
+            steps { 
+                sh './mvnw test' 
+            } 
+        }
+        
         stage('Giai đoạn 3: SonarQube') {
             steps {
-                withSonarQubeEnv("${SONAR_SERVER_NAME}") { sh './mvnw sonar:sonar' }
+                withSonarQubeEnv("${SONAR_SERVER_NAME}") { 
+                    sh './mvnw sonar:sonar' 
+                }
             }
         }
 
@@ -24,15 +36,15 @@ pipeline {
         stage('Giai đoạn 4: Deploy Nexus') {
             when { anyOf { branch 'uat/*'; branch 'main' } }
             steps {
-                // Code upload Nexus (curl) của bạn ở đây
                 sh './mvnw package -DskipTests'
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
                     sh '''
                         JAR_FILE=$(ls target/*.jar | grep -v plain)
                         curl -v -f -u ${NEXUS_USR}:${NEXUS_PSW} --upload-file ${JAR_FILE} ${NEXUS_URL}/com/fpt/petclinic/${BUILD_NUMBER}/petclinic-${BUILD_NUMBER}.jar
                     '''
-            }
-        }
+                } // Đóng withCredentials
+            } // Đóng steps
+        } // ĐÓNG STAGE 4 (ĐÂY CHÍNH LÀ DẤU NGOẶC BẠN BỊ THIẾU)
 
         stage('Giai đoạn 5: Deploy App & Health Check') {
             when { anyOf { branch 'uat/*'; branch 'main' } }

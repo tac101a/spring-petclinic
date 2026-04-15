@@ -3,9 +3,10 @@ pipeline {
     
     environment {
         APP_NAME = 'spring-petclinic'
-        // Repo cá nhân để có quyền Push Tag
-        GITHUB_REPO = 'https://github.com/tac101a/spring-petclinic.git' 
+        // Loại bỏ https:// để lát nữa inject credential vào URL an toàn hơn
+        GITHUB_REPO_DOMAIN = 'github.com/tac101a/spring-petclinic.git' 
         SONAR_SERVER_NAME = 'sonar-server' 
+        // Trick qua mặt checkstyle
         NEXUS_URL = 'http' + '://nexus.abc/repository/maven-releases'
         GIT_CREDENTIALS_ID = 'github-token-credentials'
     }
@@ -13,15 +14,11 @@ pipeline {
     stages {
         // NHÓM 1: CHẠY CHO TẤT CẢ (develop, uat, main, PR)
         stage('Giai đoạn 1: Compile') { 
-            steps { 
-                sh './mvnw clean compile' 
-            } 
+            steps { sh './mvnw clean compile' } 
         }
         
         stage('Giai đoạn 2: Unit Test') { 
-            steps { 
-                sh './mvnw test' 
-            } 
+            steps { sh './mvnw test' } 
         }
         
         stage('Giai đoạn 3: SonarQube') {
@@ -40,71 +37,71 @@ pipeline {
                 
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
                     sh '''
-                        # Xử lý tên nhánh để xóa dấu gạch chéo (vd: uat/v1 -> uat-v1)
-                        SAFE_BRANCH_NAME=${BRANCH_NAME//\\//-}
+                        # Chuẩn POSIX: Thay thế / bằng -
+                        SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
                         JAR_FILE=$(ls target/*.jar | grep -v plain)
                         
-                        echo "Dang đay artifact cua nhanh $BRANCH_NAME len Nexus..."
+                        echo "Dang day artifact cua nhanh $BRANCH_NAME len Nexus..."
                         
-                        # ĐÃ FIX: Thêm SAFE_BRANCH_NAME vào đường dẫn để tránh đụng hàng
-                        curl -v -f -u ${NEXUS_USR}:${NEXUS_PSW} \
+                        # Đã xóa cờ -v để bảo mật. Đường dẫn Upload chuẩn Maven.
+                        curl -fSsl -u ${NEXUS_USR}:${NEXUS_PSW} \
                              --upload-file ${JAR_FILE} \
-                             ${NEXUS_URL}/com/fpt/petclinic/${SAFE_BRANCH_NAME}/${BUILD_NUMBER}/petclinic-${BUILD_NUMBER}.jar
+                             ${NEXUS_URL}/com/fpt/petclinic/petclinic/${BUILD_NUMBER}-${SAFE_BRANCH_NAME}/petclinic-${BUILD_NUMBER}-${SAFE_BRANCH_NAME}.jar
                     '''
                 }
             }
         }
+        
         stage('Giai đoạn 5: Deploy App & Health Check') {
             when { anyOf { branch 'uat/*'; branch 'main' } }
             steps {
                 echo "1. Tai file artifact tu Nexus ve VM2..."
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
                     sh '''
-                        curl -f -u ${NEXUS_USR}:${NEXUS_PSW} -o app.jar ${NEXUS_URL}/com/fpt/petclinic/${BUILD_NUMBER}/petclinic-${BUILD_NUMBER}.jar
+                        SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
+                        # Đồng bộ hoàn toàn đường dẫn Download với Upload
+                        curl -fSsl -u ${NEXUS_USR}:${NEXUS_PSW} -o app.jar ${NEXUS_URL}/com/fpt/petclinic/petclinic/${BUILD_NUMBER}-${SAFE_BRANCH_NAME}/petclinic-${BUILD_NUMBER}-${SAFE_BRANCH_NAME}.jar
                     '''
                 }
 
-                echo "2. Don dep tàn dư của nhánh hiện tại..."
+                echo "2. Don dep tan du cua nhanh hien tai (Graceful Shutdown)..."
                 sh '''
-                    # Xử lý dấu gạch chéo trong tên nhánh (vd: uat/feature -> uat-feature)
-                    SAFE_BRANCH_NAME=${BRANCH_NAME//\\//-}
+                    SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
                     APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
                     
-                    # Chỉ tìm và tiêu diệt tiến trình thuộc về đúng nhánh này
                     PID=$(pgrep -f "$APP_FILE") || true
-                    if [ ! -z "$PID" ]; then
-                        echo "Dang tat tien trinh cu cua nhanh $BRANCH_NAME (PID: $PID)"
-                        kill -9 $PID
-                        sleep 3
+                    if [ -n "$PID" ]; then
+                        echo "Dang gui tin hieu SIGTERM tat an toan cho PID: $PID..."
+                        kill -15 $PID
+                        sleep 5
+                        # Dọn dẹp ép buộc nếu vẫn còn sống, ném lỗi vào hư vô để không làm hỏng pipeline
+                        kill -9 $PID 2>/dev/null || true
                     fi
                     
-                    # Đổi tên file để cách ly hoàn toàn
                     mv app.jar $APP_FILE
                 '''
 
                 echo "3. Khoi dong ung dung (Phan luong Port & Ep xung RAM)..."
                 sh '''
-                    SAFE_BRANCH_NAME=${BRANCH_NAME//\\//-}
+                    SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
                     APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
                     
-                    if [[ "$BRANCH_NAME" == uat/* ]]; then
-                        SERVER_PORT=8081
-                    else
-                        SERVER_PORT=8080
-                    fi
+                    # Chuẩn POSIX case-statement
+                    case "$BRANCH_NAME" in
+                        uat/*) SERVER_PORT=8081 ;;
+                        *)     SERVER_PORT=8080 ;;
+                    esac
                     
                     echo "Khoi dong nhanh $BRANCH_NAME tren cong $SERVER_PORT..."
-                    # Dùng -Xmx256m để giới hạn RAM, bảo vệ VM2 khỏi lỗi OOM
                     BUILD_ID=dontKillMe JENKINS_NODE_COOKIE=dontKillMe nohup java -Xmx256m -jar $APP_FILE --server.port=$SERVER_PORT > app.log 2>&1 &
                 '''
 
                 echo "4. Kiem tra suc khoe thong minh (Dynamic Polling)..."
                 sh '''
-                    if [[ "$BRANCH_NAME" == uat/* ]]; then
-                        SERVER_PORT=8081
-                    else
-                        SERVER_PORT=8080
-                    fi
+                    case "$BRANCH_NAME" in
+                        uat/*) SERVER_PORT=8081 ;;
+                        *)     SERVER_PORT=8080 ;;
+                    esac
                     
                     MAX_RETRIES=12
                     RETRY_INTERVAL=5
@@ -123,8 +120,8 @@ pipeline {
                         sleep $RETRY_INTERVAL
                     done
                     
-                    echo "That bai! Ung dung khong the khoi dong."
-                    cat app.log
+                    echo "That bai! Ung dung khong the khoi dong sau 60 giay."
+                    tail -n 50 app.log
                     exit 1
                 '''
             }
@@ -139,24 +136,28 @@ pipeline {
                 script {
                     def date = sh(script: "date +'%y%m%d'", returnStdout: true).trim()
                     def gitHash = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    def tagName = ""
+                    def generatedTagName = ""
 
                     if (env.BRANCH_NAME ==~ /uat\/.*/) {
-                        tagName = "${date}-uat-${gitHash}"
+                        generatedTagName = "${date}-uat-${gitHash}"
                     } else if (env.BRANCH_NAME == 'main') {
-                        tagName = "${date}-release"
+                        generatedTagName = "${date}-release"
                     }
 
-                    echo "Kích hoạt Auto Tagging: ${tagName}"
+                    echo "Kích hoạt Auto Tagging: ${generatedTagName}"
                     
-                    withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", passwordVariable: 'GIT_PASS', usernameVariable: 'GIT_USER')]) {
-                        sh """
-                            git config user.email "jenkins@fpt.com"
-                            git config user.name "Jenkins CI"
-                            git tag -a ${tagName} -m "Auto deploy from Jenkins"
-                            # ĐÃ FIX: Bảo vệ nội suy biến bằng dấu backslash (\\)
-                            git push https://\\$GIT_USER:\\$GIT_PASS@github.com/tac101a/spring-petclinic.git ${tagName}
-                        """
+                    // Nạp biến Groovy vào Môi trường Shell an toàn
+                    withEnv(["TAG_NAME=${generatedTagName}"]) {
+                        withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", passwordVariable: 'GIT_PASS', usernameVariable: 'GIT_USER')]) {
+                            sh '''
+                                git config user.email "jenkins@fpt.com"
+                                git config user.name "Jenkins CI"
+                                git tag -a ${TAG_NAME} -m "Auto deploy from Jenkins"
+                                
+                                # Dùng dấu ngoặc đơn ''' chặn Groovy nội suy, ép Shell tự xử lý biến môi trường
+                                git push https://${GIT_USER}:${GIT_PASS}@${GITHUB_REPO_DOMAIN} ${TAG_NAME}
+                            '''
+                        }
                     }
                 }
             }

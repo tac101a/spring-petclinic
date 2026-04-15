@@ -29,9 +29,10 @@ pipeline {
             }
         }
 
-        // NHÓM 2: CHỈ CHẠY CHO UAT VÀ MAIN
+        // NHÓM 2: CHẠY CHO CẢ 3 MÔI TRƯỜNG (DEV, UAT, MAIN)
         stage('Giai đoạn 4: Deploy Nexus') {
-            when { anyOf { branch 'uat/*'; branch 'main' } }
+            // ĐÃ THÊM: Cho phép nhánh develop được đóng gói và đẩy lên Nexus
+            when { anyOf { branch 'develop/*'; branch 'uat/*'; branch 'main' } }
             steps {
                 sh './mvnw package -DskipTests'
                 
@@ -53,7 +54,8 @@ pipeline {
         }
         
         stage('Giai đoạn 5: Deploy App & Health Check') {
-            when { anyOf { branch 'uat/*'; branch 'main' } }
+            // ĐÃ THÊM: Cho phép nhánh develop được Deploy
+            when { anyOf { branch 'develop/*'; branch 'uat/*'; branch 'main' } }
             steps {
                 echo "1. Tai file artifact tu Nexus ve VM2..."
                 withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
@@ -81,15 +83,16 @@ pipeline {
                     mv app.jar $APP_FILE
                 '''
 
-                echo "3. Khoi dong ung dung (Phan luong Port & Ep xung RAM)..."
+                echo "3. Khoi dong ung dung (Phan luong 3 Port & Ep xung RAM)..."
                 sh '''
                     SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
                     APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
                     
-                    # Chuẩn POSIX case-statement
+                    # ĐÃ THÊM: Phân luồng 3 môi trường với 3 port riêng biệt
                     case "$BRANCH_NAME" in
-                        uat/*) SERVER_PORT=8081 ;;
-                        *)     SERVER_PORT=8080 ;;
+                        develop/*) SERVER_PORT=8082 ;;
+                        uat/*)     SERVER_PORT=8081 ;;
+                        *)         SERVER_PORT=8080 ;;
                     esac
                     
                     echo "Khoi dong nhanh $BRANCH_NAME tren cong $SERVER_PORT..."
@@ -98,9 +101,11 @@ pipeline {
 
                 echo "4. Kiem tra suc khoe thong minh (Dynamic Polling)..."
                 sh '''
+                    # ĐÃ THÊM: Map đúng port cho vòng lặp Health Check
                     case "$BRANCH_NAME" in
-                        uat/*) SERVER_PORT=8081 ;;
-                        *)     SERVER_PORT=8080 ;;
+                        develop/*) SERVER_PORT=8082 ;;
+                        uat/*)     SERVER_PORT=8081 ;;
+                        *)         SERVER_PORT=8080 ;;
                     esac
                     
                     MAX_RETRIES=12
@@ -109,7 +114,7 @@ pipeline {
                     echo "Bat dau theo doi cong $SERVER_PORT..."
                     
                     for i in $(seq 1 $MAX_RETRIES); do
-                        # ĐÃ FIX: Thêm || echo "000" để vô hiệu hóa lệnh giết script của Jenkins khi curl bị từ chối kết nối
+                        # Vô hiệu hóa lệnh giết script của Jenkins khi curl bị từ chối kết nối
                         HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$SERVER_PORT/ || echo "000")
                         
                         if [ "$HTTP_STATUS" -eq 200 ]; then
@@ -128,9 +133,11 @@ pipeline {
             }
         }
 
+        // NHÓM 3: CHỈ CHẠY CHO UAT VÀ MAIN (BỎ QUA DEVELOP)
         stage('Giai đoạn 6: Auto-Tagging') {
             when { 
                 beforeAgent true
+                // Chỉ áp dụng cho UAT và Main
                 anyOf { branch 'uat/*'; branch 'main' } 
             }
             steps {
@@ -155,7 +162,7 @@ pipeline {
                                 git config user.name "Jenkins CI"
                                 git tag -a ${TAG_NAME} -m "Auto deploy from Jenkins"
                                 
-                                # Đã sửa lỗi: Không bỏ 3 dấu nháy đơn vào comment nữa để bảo toàn block
+                                # Không bỏ 3 dấu nháy đơn vào comment nữa để bảo toàn block
                                 git push https://${GIT_USER}:${GIT_PASS}@${GITHUB_REPO_DOMAIN} ${TAG_NAME}
                             '''
                         }

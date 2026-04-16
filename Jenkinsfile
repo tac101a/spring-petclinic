@@ -9,6 +9,8 @@ pipeline {
         SONAR_SERVER_NAME = 'sonar-server'
         NEXUS_URL = 'http' + '://nexus.abc/repository/maven-releases'
         NEXUS_DOCKER_URL = 'docker.abc:80'
+        DB_URL = 'jdbc:postgresql://10.0.0.5:5432/petclinic'
+        DB_CREDENTIALS_ID = 'postgres-credentials'
         GIT_CREDENTIALS_ID = 'github-token-credentials'
         NEXUS_CREDENTIALS_ID = 'nexus-credentials'
     }
@@ -86,6 +88,8 @@ pipeline {
                     branch: env.BRANCH_NAME,
                     buildNum: env.BUILD_NUMBER,
                     nexusDockerUrl: env.NEXUS_DOCKER_URL,
+                    dbUrl: env.DB_URL,
+                    dbCredId: env.DB_CREDENTIALS_ID,
                     credId: env.NEXUS_CREDENTIALS_ID
                 )
             }

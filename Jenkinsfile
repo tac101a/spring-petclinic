@@ -1,200 +1,112 @@
+@Library('my-shared-lib') _
+
 pipeline {
     agent { label 'docker-node' }
     
     environment {
         APP_NAME = 'spring-petclinic'
-        // Loại bỏ https:// để lát nữa inject credential vào URL an toàn hơn
-        GITHUB_REPO_DOMAIN = 'github.com/tac101a/spring-petclinic.git' 
-        SONAR_SERVER_NAME = 'sonar-server' 
-        // Trick qua mặt checkstyle
+        GITHUB_REPO_DOMAIN = 'github.com/tac101a/spring-petclinic.git'
+        SONAR_SERVER_NAME = 'sonar-server'
         NEXUS_URL = 'http' + '://nexus.abc/repository/maven-releases'
         GIT_CREDENTIALS_ID = 'github-token-credentials'
+        NEXUS_CREDENTIALS_ID = 'nexus-credentials'
     }
 
     stages {
-        // NHÓM 1: CHẠY CHO TẤT CẢ (develop, uat, main, PR)
-        stage('Giai đoạn 1: Compile') { 
-            steps { sh './mvnw clean compile' } 
-        }
-        
-        stage('Giai đoạn 2: Unit Test') { 
-            steps { sh './mvnw test' } 
-        }
-        
-        stage('Giai đoạn 3: SonarQube') {
+        // GROUP 1: RUN FOR ALL (develop, uat, main, PR)
+        stage('Giai doan 1: Compile') {
             steps {
-                withSonarQubeEnv("${SONAR_SERVER_NAME}") { 
-                    sh './mvnw sonar:sonar' 
-                }
-            }
-        }
-
-        // NHÓM 2: CHẠY CHO CẢ 3 MÔI TRƯỜNG (DEV, UAT, MAIN)
-        stage('Giai đoạn 4: Deploy Nexus') {
-            // ĐÃ THÊM: Cho phép nhánh develop được đóng gói và đẩy lên Nexus
-            when { anyOf { branch 'develop/*'; branch 'uat/*'; branch 'main' } }
-            steps {
-                sh './mvnw package -DskipTests'
-                
-                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
-                    sh '''
-                        # Chuẩn POSIX: Thay thế / bằng -
-                        SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
-                        JAR_FILE=$(ls target/*.jar | grep -v plain)
-                        
-                        echo "Dang day artifact cua nhanh $BRANCH_NAME len Nexus..."
-                        
-                        # Đã xóa cờ -v để bảo mật. Đường dẫn Upload chuẩn Maven.
-                        curl -fSsl -u ${NEXUS_USR}:${NEXUS_PSW} \
-                             --upload-file ${JAR_FILE} \
-                             ${NEXUS_URL}/com/fpt/petclinic/petclinic/${BUILD_NUMBER}-${SAFE_BRANCH_NAME}/petclinic-${BUILD_NUMBER}-${SAFE_BRANCH_NAME}.jar
-                    '''
-                }
+                mavenExecute('clean compile')
             }
         }
         
-        stage('Giai đoạn 5: Deploy App & Health Check') {
-            // ĐÃ THÊM: Cho phép nhánh develop được Deploy
-            when { anyOf { branch 'develop/*'; branch 'uat/*'; branch 'main' } }
+        stage('Giai doan 2: Unit Test') {
             steps {
-                echo "1. Tai file artifact tu Nexus ve VM2..."
-                withCredentials([usernamePassword(credentialsId: 'nexus-credentials', passwordVariable: 'NEXUS_PSW', usernameVariable: 'NEXUS_USR')]) {
-                    sh '''
-                        SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
-                        # Đồng bộ hoàn toàn đường dẫn Download với Upload
-                        curl -fSsl -u ${NEXUS_USR}:${NEXUS_PSW} -o app.jar ${NEXUS_URL}/com/fpt/petclinic/petclinic/${BUILD_NUMBER}-${SAFE_BRANCH_NAME}/petclinic-${BUILD_NUMBER}-${SAFE_BRANCH_NAME}.jar
-                    '''
-                }
-
-                echo "2. Don dep tan du cua nhanh hien tai (Graceful Shutdown)..."
-                sh '''
-                    SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
-                    APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
-                    
-                    PID=$(pgrep -f "$APP_FILE") || true
-                    if [ -n "$PID" ]; then
-                        echo "Dang gui tin hieu SIGTERM tat an toan cho PID: $PID..."
-                        kill -15 $PID
-                        sleep 5
-                        # Dọn dẹp ép buộc nếu vẫn còn sống, ném lỗi vào hư vô để không làm hỏng pipeline
-                        kill -9 $PID 2>/dev/null || true
-                    fi
-                    
-                    mv app.jar $APP_FILE
-                '''
-
-                echo "3. Khoi dong ung dung (Phan luong 3 Port & Ep xung RAM)..."
-                sh '''
-                    SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | tr '/' '-')
-                    APP_FILE="app-${SAFE_BRANCH_NAME}.jar"
-                    
-                    # ĐÃ THÊM: Phân luồng 3 môi trường với 3 port riêng biệt
-                    case "$BRANCH_NAME" in
-                        develop/*) SERVER_PORT=8082 ;;
-                        uat/*)     SERVER_PORT=8081 ;;
-                        *)         SERVER_PORT=8080 ;;
-                    esac
-                    
-                    echo "Khoi dong nhanh $BRANCH_NAME tren cong $SERVER_PORT..."
-                    BUILD_ID=dontKillMe JENKINS_NODE_COOKIE=dontKillMe nohup java -Xmx256m -jar $APP_FILE --server.port=$SERVER_PORT > app.log 2>&1 &
-                '''
-
-                echo "4. Kiem tra suc khoe thong minh (Dynamic Polling)..."
-                sh '''
-                    # ĐÃ THÊM: Map đúng port cho vòng lặp Health Check
-                    case "$BRANCH_NAME" in
-                        develop/*) SERVER_PORT=8082 ;;
-                        uat/*)     SERVER_PORT=8081 ;;
-                        *)         SERVER_PORT=8080 ;;
-                    esac
-                    
-                    MAX_RETRIES=12
-                    RETRY_INTERVAL=5
-                    
-                    echo "Bat dau theo doi cong $SERVER_PORT..."
-                    
-                    for i in $(seq 1 $MAX_RETRIES); do
-                        # Vô hiệu hóa lệnh giết script của Jenkins khi curl bị từ chối kết nối
-                        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$SERVER_PORT/ || echo "000")
-                        
-                        if [ "$HTTP_STATUS" -eq 200 ]; then
-                            echo "Thanh cong! Ung dung len song o giay thu $((i * RETRY_INTERVAL))."
-                            exit 0
-                        fi
-                        
-                        echo "Lan thu $i: Chua san sang (HTTP: $HTTP_STATUS). Cho $RETRY_INTERVAL giay..."
-                        sleep $RETRY_INTERVAL
-                    done
-                    
-                    echo "That bai! Ung dung khong the khoi dong sau 60 giay."
-                    tail -n 50 app.log
-                    exit 1
-                '''
+                mavenExecute('test')
+            }
+        }
+        
+        stage('Giai doan 3: SonarQube') {
+            steps {
+                sonarScan(env.SONAR_SERVER_NAME)
             }
         }
 
-        // NHÓM 3: CHỈ CHẠY CHO UAT VÀ MAIN (BỎ QUA DEVELOP)
-        stage('Giai đoạn 6: Auto-Tagging') {
+        // GROUP 2: RUN FOR ALL 3 ENVIRONMENTS (DEV, UAT, MAIN)
+        stage('Giai doan 4: Deploy Nexus') {
+            when {
+                anyOf {
+                    branch 'develop/*'
+                    branch 'uat/*'
+                    branch 'main'
+                }
+            }
+            steps {
+                mavenExecute('package -DskipTests')
+                uploadToNexus(
+                    branch: env.BRANCH_NAME,
+                    buildNum: env.BUILD_NUMBER,
+                    nexusUrl: env.NEXUS_URL,
+                    credId: env.NEXUS_CREDENTIALS_ID
+                )
+            }
+        }
+        
+        stage('Giai doan 5: Deploy App & Health Check') {
+            when {
+                anyOf {
+                    branch 'develop/*'
+                    branch 'uat/*'
+                    branch 'main'
+                }
+            }
+            steps {
+                deployApp(
+                    branch: env.BRANCH_NAME,
+                    buildNum: env.BUILD_NUMBER,
+                    nexusUrl: env.NEXUS_URL,
+                    credId: env.NEXUS_CREDENTIALS_ID
+                )
+            }
+        }
+
+        // GROUP 3: RUN ONLY FOR UAT AND MAIN
+        stage('Giai doan 6: Auto-Tagging') {
             when { 
                 beforeAgent true
-                // Chỉ áp dụng cho UAT và Main
-                anyOf { branch 'uat/*'; branch 'main' } 
+                anyOf {
+                    branch 'uat/*'
+                    branch 'main'
+                }
             }
             steps {
-                script {
-                    def date = sh(script: "date +'%y%m%d'", returnStdout: true).trim()
-                    def gitHash = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    def generatedTagName = ""
-
-                    if (env.BRANCH_NAME ==~ /uat\/.*/) {
-                        generatedTagName = "${date}-uat-${gitHash}"
-                    } else if (env.BRANCH_NAME == 'main') {
-                        generatedTagName = "${date}-b${env.BUILD_NUMBER}-release"
-                    }
-
-                    echo "Kích hoạt Auto Tagging: ${generatedTagName}"
-                    
-                    // Nạp biến Groovy vào Môi trường Shell an toàn
-                    withEnv(["TAG_NAME=${generatedTagName}"]) {
-                        withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIALS_ID}", passwordVariable: 'GIT_PASS', usernameVariable: 'GIT_USER')]) {
-                            sh '''
-                                git config user.email "jenkins@fpt.com"
-                                git config user.name "Jenkins CI"
-                                git tag -a ${TAG_NAME} -m "Auto deploy from Jenkins"
-                                
-                                # Không bỏ 3 dấu nháy đơn vào comment nữa để bảo toàn block
-                                git push https://${GIT_USER}:${GIT_PASS}@${GITHUB_REPO_DOMAIN} ${TAG_NAME}
-                            '''
-                        }
-                    }
-                }
+                createGitTag(
+                    branch: env.BRANCH_NAME,
+                    buildNum: env.BUILD_NUMBER,
+                    gitRepoDomain: env.GITHUB_REPO_DOMAIN,
+                    credId: env.GIT_CREDENTIALS_ID
+                )
             }
         }
     }
     post {
         success {
-            script {
-                def SAFE_BRANCH_NAME = env.BRANCH_NAME.replaceAll("/", "-")
-                slackSend (
-                    teamDomain: 'anhcnt-devops-lab',
-                    channel: '#jenkins-alerts',
-                    tokenCredentialId: 'slack-token',
-                    color: '#36a64f',
-                    message: "✅ *BUILD SUCCESS*\n*Project:* ${env.APP_NAME}\n*Branch:* ${SAFE_BRANCH_NAME}\n*Build:* #${env.BUILD_NUMBER}\n*URL:* ${env.BUILD_URL}"
-                )
-            }
+            notifySlack(
+                status: 'SUCCESS',
+                appName: env.APP_NAME,
+                branch: env.BRANCH_NAME,
+                buildNum: env.BUILD_NUMBER,
+                buildUrl: env.BUILD_URL
+            )
         }
         failure {
-            script {
-                def SAFE_BRANCH_NAME = env.BRANCH_NAME.replaceAll("/", "-")
-                slackSend (
-                    teamDomain: 'anhcnt-devops-lab',
-                    channel: '#jenkins-alerts',
-                    tokenCredentialId: 'slack-token',
-                    color: '#eb4034',
-                    message: "❌ *BUILD FAILED*\n*Project:* ${env.APP_NAME}\n*Branch:* ${SAFE_BRANCH_NAME}\n*Build:* #${env.BUILD_NUMBER}\n*Check log tại:* ${env.BUILD_URL}console"
-                )
-            }
+            notifySlack(
+                status: 'FAILURE',
+                appName: env.APP_NAME,
+                branch: env.BRANCH_NAME,
+                buildNum: env.BUILD_NUMBER,
+                buildUrl: "${env.BUILD_URL}console"
+            )
         }
     }
 }

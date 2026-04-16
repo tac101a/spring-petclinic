@@ -8,6 +8,7 @@ pipeline {
         GITHUB_REPO_DOMAIN = 'github.com/tac101a/spring-petclinic.git'
         SONAR_SERVER_NAME = 'sonar-server'
         NEXUS_URL = 'http' + '://nexus.abc/repository/maven-releases'
+        NEXUS_DOCKER_URL = 'docker.abc:80'
         GIT_CREDENTIALS_ID = 'github-token-credentials'
         NEXUS_CREDENTIALS_ID = 'nexus-credentials'
     }
@@ -47,6 +48,25 @@ pipeline {
                     branch: env.BRANCH_NAME,
                     buildNum: env.BUILD_NUMBER,
                     nexusUrl: env.NEXUS_URL,
+                    credId: env.NEXUS_CREDENTIALS_ID
+                )
+            }
+        }
+
+        stage('Giai doan 4.5: Build & Push Docker') {
+            when {
+                anyOf {
+                    branch 'develop/*'
+                    branch 'uat/*'
+                    branch 'main'
+                }
+            }
+            steps {
+                buildAndPushDocker(
+                    appName: env.APP_NAME,
+                    branch: env.BRANCH_NAME,
+                    buildNum: env.BUILD_NUMBER,
+                    nexusDockerUrl: env.NEXUS_DOCKER_URL,
                     credId: env.NEXUS_CREDENTIALS_ID
                 )
             }

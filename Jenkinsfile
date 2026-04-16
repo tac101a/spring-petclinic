@@ -1,4 +1,4 @@
-@Library('my-shared-lib@main') _
+@Library('my-shared-lib') _
 
 pipeline {
     agent { label 'docker-node' }
@@ -81,10 +81,11 @@ pipeline {
                 }
             }
             steps {
-                deployApp(
+                deployDockerApp(
+                    appName: env.APP_NAME,
                     branch: env.BRANCH_NAME,
                     buildNum: env.BUILD_NUMBER,
-                    nexusUrl: env.NEXUS_URL,
+                    nexusDockerUrl: env.NEXUS_DOCKER_URL,
                     credId: env.NEXUS_CREDENTIALS_ID
                 )
             }

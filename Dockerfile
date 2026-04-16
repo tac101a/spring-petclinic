@@ -11,14 +11,14 @@ WORKDIR /app
 COPY .mvn/ .mvn
 COPY mvnw pom.xml ./
 
-# Tải các thư viện dependency (Nếu pom.xml không đổi, bước này sẽ được cache)
-RUN ./mvnw dependency:go-offline
+# Tải các thư viện dependency với chế độ Batch mode (-B) để tránh lỗi I/O
+RUN ./mvnw dependency:go-offline -B
 
 # Copy toàn bộ mã nguồn vào
 COPY src ./src
 
-# Tiến hành đóng gói ứng dụng (bỏ qua Unit Test vì Jenkins đã làm ở Stage 2 rồi)
-RUN ./mvnw package -DskipTests
+# Tiến hành đóng gói ứng dụng (Bỏ test và bật Batch mode)
+RUN ./mvnw package -DskipTests -B
 
 # ==========================================
 # STAGE 2: RUNTIME (Khối thực thi)
@@ -32,7 +32,7 @@ WORKDIR /app
 RUN addgroup --system spring && adduser --system --ingroup spring springuser
 USER springuser
 
-# Ép xung RAM cho Java bên trong Container (Giống cờ -Xmx bạn từng cấu hình trên Bare-metal)
+# Ép xung RAM cho Java bên trong Container
 ENV JAVA_OPTS="-Xmx256m -Xms256m"
 
 # Chỉ copy đúng duy nhất cái file .jar từ STAGE 1 sang STAGE 2

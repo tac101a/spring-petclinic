@@ -1,4 +1,4 @@
-@Library('my-shared-lib') _
+@Library('my-shared-lib@main') _
 
 pipeline {
     agent { label 'docker-node' }

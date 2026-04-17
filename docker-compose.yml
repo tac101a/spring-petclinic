@@ -1,8 +1,7 @@
 version: '3.8'
 
 services:
-  # 1. Trái tim Hệ thống: Database
-  postgres-server:
+  postgres:
     image: postgres:15
     container_name: petclinic-db
     ports:
@@ -15,25 +14,21 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
-  # 2. Khối óc Hệ thống: Ứng dụng Spring Boot
   petclinic-app:
-    # Lấy đúng Image mà Jenkins vừa push lên
     image: docker.abc:80/spring-petclinic:42-main
     container_name: spring-petclinic
     ports:
       - "8080:8080"
     environment:
       - SPRING_PROFILES_ACTIVE=postgres
-      # Gọi thẳng tên service, không cần IP
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres-server:5432/petclinic
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/petclinic
       - SPRING_DATASOURCE_USERNAME=petclinic
       - SPRING_DATASOURCE_PASSWORD=petclinic
-      # Ép Spring Boot ghi log ra file để Volume có cái mà hứng
       - LOGGING_FILE_NAME=/app/logs/spring.log
     volumes:
       - /opt/petclinic/logs:/app/logs
     depends_on:
-      - postgres-server
+      - postgres
     restart: unless-stopped
 
 volumes:
